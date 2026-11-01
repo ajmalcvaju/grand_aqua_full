@@ -1,0 +1,123 @@
+# ========================================================
+# Grand Aqua — Root Workspace .gitignore
+# ========================================================
+
+# Operating System & Editors
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+[Dd]esktop.ini
+*.swp
+*.swo
+*~
+.idea/
+.vscode/
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
+
+# Crash & Error Logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+lerna-debug.log*
+hs_err_pid*.log
+replay_pid*.log
+
+# Environment Variables & Secrets (Keep .env.example)
+.env
+.env.*
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
+!.env.example
+!.env.sample
+
+# Large Binary APK & App Bundle Files (GitHub rejects files > 100MB)
+*.apk
+*.aab
+*.ap_
+*.ipa
+APKs/*.apk
+APKs/*.aab
+grand-aqua/APKs/*.apk
+grand-aqua/APKs/*.aab
+
+# User Uploads & Media Storage
+uploads/*
+!uploads/.gitkeep
+!uploads/products/
+!uploads/samples/
+grand-aqua/uploads/*
+!grand-aqua/uploads/.gitkeep
+grand-aqua/grand aqua backend/uploads/*
+!grand-aqua/grand aqua backend/uploads/.gitkeep
+!grand-aqua/grand aqua backend/uploads/products/
+
+# Local Temporary Data & Test Exports
+mongo_data/
+*.sqlite
+*.sqlite3
+*.db
+test_invoice*.pdf
+invoice_t*.pdf
+quote_t*.pdf
+tax_invoice*.pdf
+
+# ========================================================
+# Node.js / NestJS / Next.js (Backend & Web Apps)
+# ========================================================
+**/node_modules/
+node_modules/
+**/dist/
+dist/
+**/.next/
+.next/
+**/out/
+out/
+.turbo/
+.cache/
+coverage/
+*.tsbuildinfo
+.eslintcache
+
+# ========================================================
+# Flutter & Dart (Buyer, Salesman & Super Admin Apps)
+# ========================================================
+**/.dart_tool/
+.dart_tool/
+**/.flutter-plugins
+**/.flutter-plugins-dependencies
+**/.packages
+**/.pub-cache/
+**/.pub/
+**/build/
+build/
+
+# Android Native Artifacts & Gradle
+**/.gradle/
+**/local.properties
+**/android/app/build/
+**/android/app/src/main/assets/
+**/android/key.properties
+*.jks
+*.keystore
+
+# iOS / macOS Native Artifacts
+**/ios/.symlinks/
+**/ios/Pods/
+**/ios/Podfile.lock
+**/ios/Flutter/Flutter.framework
+**/ios/Flutter/Flutter.podspec
+**/ios/Flutter/Generated.xcconfig
+**/ios/Flutter/app.framework
+**/ios/DerivedData/

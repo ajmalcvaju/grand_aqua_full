@@ -1,0 +1,21 @@
+# Grand Aqua Sub-directory .gitignore
+node_modules/
+dist/
+.next/
+out/
+build/
+.dart_tool/
+.env
+.env.*
+!.env.example
+*.log
+*.apk
+*.aab
+APKs/*.apk
+APKs/*.aab
+uploads/*
+!uploads/.gitkeep
+!uploads/products/
+!uploads/samples/
+.idea/
+.vscode/

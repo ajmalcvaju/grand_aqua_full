@@ -1,0 +1,993 @@
+// Prisma Schema for Grand Aqua Unified Ecosystem
+// Supports PostgreSQL database
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// -----------------------------------------------------------------------------
+// ENUMS
+// -----------------------------------------------------------------------------
+
+enum UserRoleType {
+  SUPER_ADMIN
+  OPERATIONS_ADMIN
+  SALES_MANAGER
+  PRODUCT_MANAGER
+  ACCOUNTS_MANAGER
+  ORDER_MANAGER
+  SUPPORT_ADMIN
+  SALESMAN
+  BUYER
+}
+
+enum BuyerType {
+  CUSTOMER
+  DEALER
+  WHOLESALER
+  DISTRIBUTOR
+}
+
+enum LoyaltyTierLevel {
+  NONE
+  DIAMOND
+  GOLD
+  PLATINUM
+}
+
+enum AccountStatus {
+  ACTIVE
+  PENDING_VERIFICATION
+  SUSPENDED
+  BLOCKED
+}
+
+enum QuotationStatus {
+  DRAFT
+  PENDING_DISCOUNT_APPROVAL
+  DISCOUNT_APPROVED
+  DISCOUNT_REJECTED
+  ISSUED
+  ACCEPTED
+  REJECTED
+  EXPIRED
+  CANCELLED
+  CONVERTED_TO_ORDER
+}
+
+enum DiscountApprovalStatus {
+  NOT_REQUESTED
+  PENDING
+  APPROVED
+  REJECTED
+  REVISED
+}
+
+enum OrderStatus {
+  PENDING
+  CONFIRMED
+  PROCESSING
+  SHIPPED
+  DELIVERED
+  CANCELLED
+  RETURNED
+}
+
+enum PaymentStatus {
+  PENDING
+  PARTIALLY_PAID
+  PAID
+  FAILED
+  REFUNDED
+}
+
+enum PaymentMethod {
+  CASH
+  UPI
+  BANK_TRANSFER
+  CARD
+  CHEQUE
+  CREDIT_ACCOUNT
+  ONLINE_GATEWAY
+}
+
+enum OfferType {
+  PERCENTAGE_DISCOUNT
+  FIXED_VALUE_DISCOUNT
+  PRODUCT_SPECIFIC
+  CATEGORY_SPECIFIC
+  MIN_ORDER_VALUE
+  BUY_X_GET_Y
+  FREE_GIFT
+  GIFT_VOUCHER
+  REWARD_POINTS
+}
+
+enum CreditStatus {
+  ACTIVE
+  SUSPENDED
+  OVERDUE
+  CLOSED
+}
+
+// -----------------------------------------------------------------------------
+// CORE USERS & RBAC
+// -----------------------------------------------------------------------------
+
+model User {
+  id               String            @id @default(uuid())
+  email            String?           @unique
+  phone            String?           @unique
+  passwordHash     String?
+  fullName         String
+  role             UserRoleType      @default(BUYER)
+  status           AccountStatus     @default(ACTIVE)
+  profilePhoto     String?
+  lastLoginAt      DateTime?
+  failedAttempts   Int               @default(0)
+  lockedUntil      DateTime?
+  createdAt        DateTime          @default(now())
+  updatedAt        DateTime          @updatedAt
+
+  buyerProfile     BuyerProfile?
+  salesmanProfile  SalesmanProfile?
+  assignedRoles    UserRole[]
+  notifications    Notification[]
+  deviceTokens     DeviceToken[]
+  auditLogs        AuditLog[]
+  assignedTickets  SupportTicket[]   @relation("AssignedAdminTickets")
+
+  @@index([role, status])
+}
+
+model AdminRole {
+  id          String           @id @default(uuid())
+  name        String           @unique
+  description String?
+  isSystem    Boolean          @default(false)
+  createdAt   DateTime         @default(now())
+  updatedAt   DateTime         @updatedAt
+
+  permissions RolePermission[]
+  userRoles   UserRole[]
+}
+
+model Permission {
+  id          String           @id @default(uuid())
+  module      String           // buyers, products, quotations, orders, payments, etc.
+  action      String           // view, create, edit, delete, approve, export, manage_settings
+  description String?
+  createdAt   DateTime         @default(now())
+
+  roles       RolePermission[]
+
+  @@unique([module, action])
+}
+
+model RolePermission {
+  id           String      @id @default(uuid())
+  roleId       String
+  permissionId String
+
+  role         AdminRole   @relation(fields: [roleId], references: [id], onDelete: Cascade)
+  permission   Permission  @relation(fields: [permissionId], references: [id], onDelete: Cascade)
+
+  @@unique([roleId, permissionId])
+}
+
+model UserRole {
+  id        String    @id @default(uuid())
+  userId    String
+  roleId    String
+
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  role      AdminRole @relation(fields: [roleId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, roleId])
+}
+
+// -----------------------------------------------------------------------------
+// BUYER & PROFILES
+// -----------------------------------------------------------------------------
+
+model BuyerProfile {
+  id                  String             @id @default(uuid())
+  buyerId             String             @unique // readable code e.g. GA-B-1001
+  userId              String             @unique
+  user                User               @relation(fields: [userId], references: [id], onDelete: Cascade)
+  businessName        String?
+  businessType        String?            // Water Purifier Retailer, Commercial Distributor, etc.
+  gstin               String?
+  billingAddress      String?
+  shippingAddress     String?
+  district            String?
+  state               String?
+  pinCode             String?
+  buyerType           BuyerType          @default(CUSTOMER)
+  loyaltyTier         LoyaltyTierLevel   @default(NONE)
+  assignedSalesmanId  String?
+  assignedSalesman    SalesmanProfile?   @relation("SalesmanAssignedBuyers", fields: [assignedSalesmanId], references: [id])
+  accountStatus       AccountStatus      @default(ACTIVE)
+  creditLimit         Decimal            @default(0) @db.Decimal(12, 2)
+  outstandingBalance  Decimal            @default(0) @db.Decimal(12, 2)
+  paymentTerms        String?            @default("Immediate Payment")
+  totalPurchaseValue  Decimal            @default(0) @db.Decimal(14, 2)
+  totalOrders         Int                @default(0)
+  totalPayments       Decimal            @default(0) @db.Decimal(14, 2)
+  verificationStatus  String             @default("VERIFIED")
+  internalNotes       String?
+  createdAt           DateTime           @default(now())
+  updatedAt           DateTime           @updatedAt
+
+  addresses           BuyerAddress[]
+  assignments         BuyerAssignment[]
+  assignmentHistory   BuyerAssignmentHistory[]
+  typeHistory         BuyerTypeHistory[]
+  loyaltyMemberships  LoyaltyMembership[]
+  loyaltyHistory      LoyaltyHistory[]
+  creditAccount       CreditAccount?
+  creditApplications  CreditApplication[]
+  quotations          Quotation[]
+  orders              Order[]
+  payments            Payment[]
+  voucherRedemptions  VoucherRedemption[]
+  offerRedemptions    OfferRedemption[]
+  reviews             ProductReview[]
+  supportTickets      SupportTicket[]
+
+  @@index([buyerType, loyaltyTier, accountStatus])
+  @@index([assignedSalesmanId])
+}
+
+model BuyerAddress {
+  id             String       @id @default(uuid())
+  buyerProfileId String
+  buyer          BuyerProfile @relation(fields: [buyerProfileId], references: [id], onDelete: Cascade)
+  addressType    String       @default("SHIPPING") // SHIPPING, BILLING
+  streetAddress  String
+  landmark       String?
+  city           String
+  state          String
+  pinCode        String
+  isDefault      Boolean      @default(false)
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+}
+
+model BuyerAssignment {
+  id                String          @id @default(uuid())
+  buyerProfileId    String
+  salesmanProfileId String
+  assignedBy        String
+  assignedAt        DateTime        @default(now())
+  status            String          @default("ACTIVE") // ACTIVE, HISTORICAL
+
+  buyer             BuyerProfile    @relation(fields: [buyerProfileId], references: [id], onDelete: Cascade)
+  salesman          SalesmanProfile @relation(fields: [salesmanProfileId], references: [id], onDelete: Cascade)
+}
+
+model BuyerAssignmentHistory {
+  id             String       @id @default(uuid())
+  buyerProfileId String
+  fromSalesmanId String?
+  toSalesmanId   String
+  reason         String?
+  changedBy      String
+  changedAt      DateTime     @default(now())
+
+  buyer          BuyerProfile @relation(fields: [buyerProfileId], references: [id], onDelete: Cascade)
+}
+
+model BuyerTypeHistory {
+  id             String       @id @default(uuid())
+  buyerProfileId String
+  previousType   BuyerType
+  newType        BuyerType
+  reason         String
+  changedBy      String
+  changedAt      DateTime     @default(now())
+
+  buyer          BuyerProfile @relation(fields: [buyerProfileId], references: [id], onDelete: Cascade)
+}
+
+// -----------------------------------------------------------------------------
+// LOYALTY TIERS & HISTORY
+// -----------------------------------------------------------------------------
+
+model LoyaltyTier {
+  id                  String             @id @default(uuid())
+  tierLevel           LoyaltyTierLevel   @unique
+  name                String
+  minPurchaseValue    Decimal            @db.Decimal(12, 2)
+  minOrderCount       Int
+  benefitsDescription String
+  colorHex            String             @default("#0284c7")
+  badgeIcon           String?
+  createdAt           DateTime           @default(now())
+  updatedAt           DateTime           @updatedAt
+
+  memberships         LoyaltyMembership[]
+}
+
+model LoyaltyMembership {
+  id               String           @id @default(uuid())
+  buyerProfileId   String
+  tierId           String
+  effectiveDate    DateTime         @default(now())
+  expiryDate       DateTime?
+  isManualOverride Boolean          @default(false)
+  overrideReason   String?
+  createdAt        DateTime         @default(now())
+  updatedAt        DateTime         @updatedAt
+
+  buyer            BuyerProfile     @relation(fields: [buyerProfileId], references: [id], onDelete: Cascade)
+  tier             LoyaltyTier      @relation(fields: [tierId], references: [id], onDelete: Cascade)
+}
+
+model LoyaltyHistory {
+  id             String           @id @default(uuid())
+  buyerProfileId String
+  fromTier       LoyaltyTierLevel
+  toTier         LoyaltyTierLevel
+  reason         String
+  changedBy      String
+  changedAt      DateTime         @default(now())
+
+  buyer          BuyerProfile     @relation(fields: [buyerProfileId], references: [id], onDelete: Cascade)
+}
+
+// -----------------------------------------------------------------------------
+// OFFERS, REWARDS & VOUCHERS
+// -----------------------------------------------------------------------------
+
+model Offer {
+  id                  String                @id @default(uuid())
+  code                String                @unique
+  title               String
+  description         String
+  offerType           OfferType
+  discountValue       Decimal               @db.Decimal(10, 2)
+  minOrderValue       Decimal               @default(0) @db.Decimal(10, 2)
+  maxDiscount         Decimal?              @db.Decimal(10, 2)
+  targetBuyerType     BuyerType?
+  targetLoyaltyTier   LoyaltyTierLevel?
+  startDate           DateTime
+  endDate             DateTime
+  isActive            Boolean               @default(true)
+  termsAndConditions  String?
+  createdAt           DateTime              @default(now())
+  updatedAt           DateTime              @updatedAt
+
+  eligibilityRules    OfferEligibilityRule[]
+  redemptions         OfferRedemption[]
+}
+
+model OfferEligibilityRule {
+  id        String   @id @default(uuid())
+  offerId   String
+  ruleType  String   // MIN_ITEMS, SPECIFIC_CATEGORY, SPECIFIC_PRODUCT
+  ruleValue String
+  offer     Offer    @relation(fields: [offerId], references: [id], onDelete: Cascade)
+}
+
+model OfferRedemption {
+  id              String       @id @default(uuid())
+  offerId         String
+  buyerProfileId  String
+  orderId         String?
+  discountApplied Decimal      @db.Decimal(10, 2)
+  redeemedAt      DateTime     @default(now())
+
+  offer           Offer        @relation(fields: [offerId], references: [id], onDelete: Cascade)
+  buyer           BuyerProfile @relation(fields: [buyerProfileId], references: [id], onDelete: Cascade)
+}
+
+model GiftVoucher {
+  id                String              @id @default(uuid())
+  code              String              @unique
+  title             String
+  voucherValue      Decimal             @db.Decimal(10, 2)
+  isPercentage      Boolean             @default(false)
+  minOrderValue     Decimal             @default(0) @db.Decimal(10, 2)
+  maxUsesTotal      Int                 @default(100)
+  maxUsesPerBuyer   Int                 @default(1)
+  currentUses       Int                 @default(0)
+  validFrom         DateTime
+  validUntil        DateTime
+  status            String              @default("ACTIVE") // ACTIVE, EXPIRED, CANCELLED
+  targetBuyerType   BuyerType?
+  targetLoyaltyTier LoyaltyTierLevel?
+  createdAt         DateTime            @default(now())
+  updatedAt         DateTime            @updatedAt
+
+  redemptions       VoucherRedemption[]
+}
+
+model VoucherRedemption {
+  id             String       @id @default(uuid())
+  voucherId      String
+  buyerProfileId String
+  orderId        String?
+  discountAmount Decimal      @db.Decimal(10, 2)
+  redeemedAt     DateTime     @default(now())
+
+  voucher        GiftVoucher  @relation(fields: [voucherId], references: [id], onDelete: Cascade)
+  buyer          BuyerProfile @relation(fields: [buyerProfileId], references: [id], onDelete: Cascade)
+}
+
+// -----------------------------------------------------------------------------
+// CREDIT MANAGEMENT
+// -----------------------------------------------------------------------------
+
+model CreditAccount {
+  id               String              @id @default(uuid())
+  buyerProfileId   String              @unique
+  creditLimit      Decimal             @db.Decimal(12, 2)
+  utilizedCredit   Decimal             @default(0) @db.Decimal(12, 2)
+  availableCredit  Decimal             @db.Decimal(12, 2)
+  paymentTermsDays Int                 @default(15)
+  status           CreditStatus        @default(ACTIVE)
+  approvedBy       String?
+  approvedAt       DateTime?
+  createdAt        DateTime            @default(now())
+  updatedAt        DateTime            @updatedAt
+
+  buyer            BuyerProfile        @relation(fields: [buyerProfileId], references: [id], onDelete: Cascade)
+  transactions     CreditTransaction[]
+}
+
+model CreditApplication {
+  id             String       @id @default(uuid())
+  buyerProfileId String
+  requestedLimit Decimal      @db.Decimal(12, 2)
+  reason         String
+  status         String       @default("PENDING") // PENDING, APPROVED, REJECTED
+  reviewedBy     String?
+  reviewedAt     DateTime?
+  reviewNotes    String?
+  createdAt      DateTime     @default(now())
+
+  buyer          BuyerProfile @relation(fields: [buyerProfileId], references: [id], onDelete: Cascade)
+}
+
+model CreditTransaction {
+  id              String        @id @default(uuid())
+  creditAccountId String
+  transactionType String        // USAGE, PAYMENT_SETTLEMENT, LIMIT_INCREASE, LIMIT_DECREASE, ADJUSTMENT
+  amount          Decimal       @db.Decimal(12, 2)
+  balanceAfter    Decimal       @db.Decimal(12, 2)
+  referenceType   String?       // ORDER, PAYMENT, MANUAL
+  referenceId     String?
+  notes           String?
+  createdBy       String
+  createdAt       DateTime      @default(now())
+
+  creditAccount   CreditAccount @relation(fields: [creditAccountId], references: [id], onDelete: Cascade)
+}
+
+// -----------------------------------------------------------------------------
+// PRODUCTS & 4-TIER PRICING & MEDIA
+// -----------------------------------------------------------------------------
+
+model ProductCategory {
+  id          String            @id @default(uuid())
+  name        String
+  slug        String            @unique
+  description String?
+  image       String?
+  parentId    String?
+  isActive    Boolean           @default(true)
+  createdAt   DateTime          @default(now())
+  updatedAt   DateTime          @updatedAt
+
+  parent      ProductCategory?  @relation("CategoryHierarchy", fields: [parentId], references: [id])
+  children    ProductCategory[] @relation("CategoryHierarchy")
+  products    Product[]
+}
+
+model Product {
+  id                      String                @id @default(uuid())
+  sku                     String                @unique
+  name                    String
+  brand                   String                @default("Grand Aqua")
+  categoryId              String
+  category                ProductCategory       @relation(fields: [categoryId], references: [id])
+  subcategoryId           String?
+  shortDescription        String?
+  fullDescription         String?
+  technicalSpecifications Json?                 // e.g. {"flow_rate": "15 LPH", "membrane": "75 GPD", "tank_capacity": "10 Litres"}
+  modelNumber             String?
+  unitOfMeasurement       String                @default("Piece")
+  warrantyDetails         String?               @default("1 Year Comprehensive Manufacturer Warranty")
+  status                  String                @default("ACTIVE") // ACTIVE, ARCHIVED, DRAFT
+  isFeatured              Boolean               @default(false)
+  createdBy               String?
+  createdAt               DateTime              @default(now())
+  updatedAt               DateTime              @updatedAt
+
+  pricing                 ProductPrice?
+  priceHistory            ProductPriceHistory[]
+  media                   ProductMedia[]
+  inventory               InventoryItem?
+  quotationItems          QuotationItem[]
+  orderItems              OrderItem[]
+  reviews                 ProductReview[]
+
+  @@index([status, isFeatured])
+}
+
+model ProductPrice {
+  id               String    @id @default(uuid())
+  productId        String    @unique
+  product          Product   @relation(fields: [productId], references: [id], onDelete: Cascade)
+  distributorPrice Decimal   @db.Decimal(12, 2)
+  wholesalerPrice  Decimal   @db.Decimal(12, 2)
+  dealerPrice      Decimal   @db.Decimal(12, 2)
+  customerPrice    Decimal   @db.Decimal(12, 2)
+  minOrderQuantity Int       @default(1)
+  taxRate          Decimal   @default(18.00) @db.Decimal(5, 2) // standard GST %
+  effectiveFrom    DateTime  @default(now())
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
+}
+
+model ProductPriceHistory {
+  id        String   @id @default(uuid())
+  productId String
+  priceType BuyerType
+  oldPrice  Decimal  @db.Decimal(12, 2)
+  newPrice  Decimal  @db.Decimal(12, 2)
+  reason    String
+  changedBy String
+  changedAt DateTime @default(now())
+
+  product   Product  @relation(fields: [productId], references: [id], onDelete: Cascade)
+}
+
+model ProductMedia {
+  id           String   @id @default(uuid())
+  productId    String
+  mediaType    String   // IMAGE, 3D_MODEL, VIDEO, BROCHURE_PDF
+  url          String
+  thumbnailUrl String?
+  isPrimary    Boolean  @default(false)
+  displayOrder Int      @default(0)
+  createdAt    DateTime @default(now())
+
+  product      Product  @relation(fields: [productId], references: [id], onDelete: Cascade)
+}
+
+model InventoryItem {
+  id            String   @id @default(uuid())
+  productId     String   @unique
+  currentStock  Int      @default(0)
+  reorderLevel  Int      @default(5)
+  reservedStock Int      @default(0)
+  unit          String   @default("Units")
+  location      String?  @default("Central Grand Aqua Warehouse")
+  updatedAt     DateTime @updatedAt
+
+  product       Product  @relation(fields: [productId], references: [id], onDelete: Cascade)
+}
+
+// -----------------------------------------------------------------------------
+// SALESMEN & TARGETS & INCENTIVES
+// -----------------------------------------------------------------------------
+
+model SalesmanProfile {
+  id                    String            @id @default(uuid())
+  userId                String            @unique
+  user                  User              @relation(fields: [userId], references: [id], onDelete: Cascade)
+  employeeCode          String            @unique
+  address               String?
+  dateOfJoining         DateTime          @default(now())
+  employmentStatus      String            @default("ACTIVE")
+  assignedTerritory     String?           // e.g. North Delhi, South Gujarat, Bengaluru East
+  monthlySalesTarget    Decimal           @default(500000) @db.Decimal(12, 2)
+  quarterlySalesTarget  Decimal           @default(1500000) @db.Decimal(12, 2)
+  activeShopsCount      Int               @default(0)
+  bankAccountDetails    Json?             // for incentive payouts
+  createdAt             DateTime          @default(now())
+  updatedAt             DateTime          @updatedAt
+
+  assignedBuyers        BuyerProfile[]    @relation("SalesmanAssignedBuyers")
+  buyerAssignments      BuyerAssignment[]
+  salesTargets          SalesTarget[]
+  incentiveLedger       IncentiveLedger[]
+  quotations            Quotation[]
+  orders                Order[]
+}
+
+model SalesTarget {
+  id                String          @id @default(uuid())
+  salesmanProfileId String
+  targetPeriod      String          // MONTHLY, QUARTERLY, ANNUAL
+  periodStart       DateTime
+  periodEnd         DateTime
+  targetAmount      Decimal         @db.Decimal(12, 2)
+  achievedAmount    Decimal         @default(0) @db.Decimal(12, 2)
+  targetOrders      Int             @default(0)
+  achievedOrders    Int             @default(0)
+  status            String          @default("IN_PROGRESS") // IN_PROGRESS, ACHIEVED, MISSED
+
+  salesman          SalesmanProfile @relation(fields: [salesmanProfileId], references: [id], onDelete: Cascade)
+}
+
+model IncentivePlan {
+  id                   String            @id @default(uuid())
+  name                 String
+  planType             String            // PERCENTAGE_OF_SALES, FIXED_PER_ORDER, COLLECTION_BASED, TIERED_TARGET
+  percentageRate       Decimal?          @db.Decimal(5, 2)
+  fixedAmountPerOrder  Decimal?          @db.Decimal(10, 2)
+  minOrderValue        Decimal           @default(0) @db.Decimal(10, 2)
+  basis                String            @default("DELIVERED_ORDERS") // DELIVERED_ORDERS, COLLECTED_PAYMENTS
+  description          String?
+  isActive             Boolean           @default(true)
+  createdAt            DateTime          @default(now())
+  updatedAt            DateTime          @updatedAt
+
+  ledgerEntries        IncentiveLedger[]
+}
+
+model IncentiveLedger {
+  id                String          @id @default(uuid())
+  salesmanProfileId String
+  orderId           String?
+  incentivePlanId   String?
+  eligibleSales     Decimal         @db.Decimal(12, 2)
+  incentiveRate     Decimal         @db.Decimal(5, 2)
+  calculatedAmount  Decimal         @db.Decimal(10, 2)
+  approvedAmount    Decimal         @db.Decimal(10, 2)
+  status            String          @default("PROVISIONAL") // PROVISIONAL, APPROVED, PAID, ADJUSTED, REVERSED
+  approvedBy        String?
+  approvedAt        DateTime?
+  paidAt            DateTime?
+  remarks           String?
+  createdAt         DateTime        @default(now())
+
+  salesman          SalesmanProfile @relation(fields: [salesmanProfileId], references: [id], onDelete: Cascade)
+  incentivePlan     IncentivePlan?  @relation(fields: [incentivePlanId], references: [id])
+}
+
+// -----------------------------------------------------------------------------
+// QUOTATIONS & DISCOUNT APPROVALS & VERSIONS
+// -----------------------------------------------------------------------------
+
+model Quotation {
+  id                           String                 @id @default(uuid())
+  quotationNumber              String                 @unique // GA-QT-2026-0001
+  buyerProfileId               String
+  salesmanProfileId            String?
+  status                       QuotationStatus        @default(DRAFT)
+  validUntil                   DateTime
+  subtotal                     Decimal                @db.Decimal(12, 2)
+  lineDiscountTotal            Decimal                @default(0) @db.Decimal(12, 2)
+  additionalDiscountRequested  Decimal                @default(0) @db.Decimal(12, 2)
+  additionalDiscountApproved   Decimal                @default(0) @db.Decimal(12, 2)
+  discountApprovalStatus       DiscountApprovalStatus @default(NOT_REQUESTED)
+  taxAmount                    Decimal                @db.Decimal(12, 2)
+  shippingCharges              Decimal                @default(0) @db.Decimal(10, 2)
+  finalTotal                   Decimal                @db.Decimal(12, 2)
+  paymentTerms                 String                 @default("Payment on Delivery / Approved Credit")
+  creditDetails                String?
+  termsConditions              String?
+  internalNotes                String?
+  buyerNotes                   String?
+  discountReason               String?
+  approvedBy                   String?
+  approvedAt                   DateTime?
+  discountRejectionReason      String?
+  pdfUrl                       String?
+  createdAt                    DateTime               @default(now())
+  updatedAt                    DateTime               @updatedAt
+
+  buyer                        BuyerProfile           @relation(fields: [buyerProfileId], references: [id])
+  salesman                     SalesmanProfile?       @relation(fields: [salesmanProfileId], references: [id])
+  items                        QuotationItem[]
+  versions                     QuotationVersion[]
+  discountApprovals            DiscountApproval[]
+  orders                       Order[]
+
+  @@index([status, discountApprovalStatus])
+}
+
+model QuotationItem {
+  id           String    @id @default(uuid())
+  quotationId  String
+  productId    String
+  sku          String
+  productName  String
+  quantity     Int
+  unitPrice    Decimal   @db.Decimal(12, 2)
+  lineDiscount Decimal   @default(0) @db.Decimal(10, 2)
+  taxRate      Decimal   @default(18.00) @db.Decimal(5, 2)
+  taxAmount    Decimal   @db.Decimal(10, 2)
+  totalPrice   Decimal   @db.Decimal(12, 2)
+
+  quotation    Quotation @relation(fields: [quotationId], references: [id], onDelete: Cascade)
+  product      Product   @relation(fields: [productId], references: [id])
+}
+
+model QuotationVersion {
+  id            String    @id @default(uuid())
+  quotationId   String
+  versionNumber Int
+  snapshotData  Json
+  reason        String
+  createdBy     String
+  createdAt     DateTime  @default(now())
+
+  quotation     Quotation @relation(fields: [quotationId], references: [id], onDelete: Cascade)
+}
+
+model DiscountApproval {
+  id               String    @id @default(uuid())
+  quotationId      String
+  requestedDiscount Decimal  @db.Decimal(12, 2)
+  proposedTotal    Decimal   @db.Decimal(12, 2)
+  reason           String
+  status           String    @default("PENDING") // PENDING, APPROVED, REJECTED, REVISED
+  approvedDiscount Decimal?  @db.Decimal(12, 2)
+  finalTotal       Decimal?  @db.Decimal(12, 2)
+  approverNotes    String?
+  approverId       String?
+  actionAt         DateTime?
+  createdAt        DateTime  @default(now())
+
+  quotation        Quotation @relation(fields: [quotationId], references: [id], onDelete: Cascade)
+}
+
+// -----------------------------------------------------------------------------
+// ORDERS & ORDER ITEMS & TIMELINE
+// -----------------------------------------------------------------------------
+
+model Order {
+  id                   String               @id @default(uuid())
+  orderNumber          String               @unique // GA-ORD-2026-0001
+  sourceQuotationId    String?
+  buyerProfileId       String
+  salesmanProfileId    String?
+  status               OrderStatus          @default(PENDING)
+  paymentStatus        PaymentStatus        @default(PENDING)
+  paymentMethod        PaymentMethod        @default(ONLINE_GATEWAY)
+  subtotal             Decimal              @db.Decimal(12, 2)
+  discountTotal        Decimal              @default(0) @db.Decimal(12, 2)
+  taxTotal             Decimal              @db.Decimal(12, 2)
+  shippingCharges      Decimal              @default(0) @db.Decimal(10, 2)
+  finalAmount          Decimal              @db.Decimal(12, 2)
+  paidAmount           Decimal              @default(0) @db.Decimal(12, 2)
+  outstandingAmount    Decimal              @db.Decimal(12, 2)
+  shippingAddress      Json
+  billingAddress       Json
+  deliveryNotes        String?
+  trackingNumber       String?
+  expectedDeliveryDate DateTime?
+  deliveredAt          DateTime?
+  cancelledAt          DateTime?
+  cancellationReason   String?
+  createdAt            DateTime             @default(now())
+  updatedAt            DateTime             @updatedAt
+
+  sourceQuotation      Quotation?           @relation(fields: [sourceQuotationId], references: [id])
+  buyer                BuyerProfile         @relation(fields: [buyerProfileId], references: [id])
+  salesman             SalesmanProfile?     @relation(fields: [salesmanProfileId], references: [id])
+  items                OrderItem[]
+  statusHistory        OrderStatusHistory[]
+  payments             Payment[]
+  allocations          PaymentAllocation[]
+  invoices             Invoice[]
+  returnRequests       ReturnRequest[]
+
+  @@index([status, paymentStatus])
+}
+
+model OrderItem {
+  id             String   @id @default(uuid())
+  orderId        String
+  productId      String
+  sku            String
+  productName    String
+  quantity       Int
+  unitPrice      Decimal  @db.Decimal(12, 2)
+  discountAmount Decimal  @default(0) @db.Decimal(10, 2)
+  taxAmount      Decimal  @db.Decimal(10, 2)
+  totalPrice     Decimal  @db.Decimal(12, 2)
+
+  order          Order    @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  product        Product  @relation(fields: [productId], references: [id])
+}
+
+model OrderStatusHistory {
+  id         String      @id @default(uuid())
+  orderId    String
+  fromStatus OrderStatus
+  toStatus   OrderStatus
+  reason     String?
+  changedBy  String
+  changedAt  DateTime    @default(now())
+
+  order      Order       @relation(fields: [orderId], references: [id], onDelete: Cascade)
+}
+
+// -----------------------------------------------------------------------------
+// PAYMENTS & ALLOCATIONS & INVOICES
+// -----------------------------------------------------------------------------
+
+model Payment {
+  id                   String              @id @default(uuid())
+  paymentNumber        String              @unique // GA-PAY-2026-0001
+  buyerProfileId       String
+  orderId              String?
+  amount               Decimal             @db.Decimal(12, 2)
+  paymentMethod        PaymentMethod
+  transactionReference String?
+  paymentStatus        PaymentStatus       @default(PAID)
+  paymentDate          DateTime            @default(now())
+  isManualEntry        Boolean             @default(false)
+  receivedBy           String?
+  notes                String?
+  receiptUrl           String?
+  createdAt            DateTime            @default(now())
+
+  buyer                BuyerProfile        @relation(fields: [buyerProfileId], references: [id])
+  order                Order?              @relation(fields: [orderId], references: [id])
+  allocations          PaymentAllocation[]
+  refunds              Refund[]
+}
+
+model PaymentAllocation {
+  id              String   @id @default(uuid())
+  paymentId       String
+  orderId         String
+  allocatedAmount Decimal  @db.Decimal(12, 2)
+  allocatedAt     DateTime @default(now())
+
+  payment         Payment  @relation(fields: [paymentId], references: [id], onDelete: Cascade)
+  order           Order    @relation(fields: [orderId], references: [id], onDelete: Cascade)
+}
+
+model Invoice {
+  id             String       @id @default(uuid())
+  invoiceNumber  String       @unique // GA-INV-2026-0001
+  orderId        String
+  buyerProfileId String
+  invoiceDate    DateTime     @default(now())
+  dueDate        DateTime
+  subtotal       Decimal      @db.Decimal(12, 2)
+  taxAmount      Decimal      @db.Decimal(12, 2)
+  discountAmount Decimal      @default(0) @db.Decimal(12, 2)
+  totalAmount    Decimal      @db.Decimal(12, 2)
+  pdfUrl         String?
+  status         String       @default("ISSUED") // ISSUED, PAID, VOID
+
+  order          Order        @relation(fields: [orderId], references: [id], onDelete: Cascade)
+}
+
+model Refund {
+  id          String   @id @default(uuid())
+  paymentId   String
+  orderId     String?
+  amount      Decimal  @db.Decimal(12, 2)
+  reason      String
+  status      String   @default("COMPLETED")
+  processedBy String
+  processedAt DateTime @default(now())
+
+  payment     Payment  @relation(fields: [paymentId], references: [id])
+}
+
+model ReturnRequest {
+  id             String       @id @default(uuid())
+  orderId        String
+  buyerProfileId String
+  reason         String
+  status         String       @default("PENDING") // PENDING, APPROVED, REJECTED, COMPLETED
+  resolution     String?
+  processedBy    String?
+  processedAt    DateTime?
+  createdAt      DateTime     @default(now())
+
+  order          Order        @relation(fields: [orderId], references: [id])
+}
+
+// -----------------------------------------------------------------------------
+// REVIEWS & RATINGS
+// -----------------------------------------------------------------------------
+
+model ProductReview {
+  id                 String       @id @default(uuid())
+  productId          String
+  buyerProfileId     String
+  orderId            String?
+  rating             Int          // 1 to 5
+  title              String
+  comment            String
+  images             Json?        // string array of image URLs
+  isVerifiedPurchase Boolean      @default(true)
+  isApproved         Boolean      @default(true)
+  createdAt          DateTime     @default(now())
+
+  product            Product      @relation(fields: [productId], references: [id], onDelete: Cascade)
+  buyer              BuyerProfile @relation(fields: [buyerProfileId], references: [id], onDelete: Cascade)
+
+  @@unique([productId, buyerProfileId, orderId])
+}
+
+// -----------------------------------------------------------------------------
+// NOTIFICATIONS & DEVICES
+// -----------------------------------------------------------------------------
+
+model Notification {
+  id            String   @id @default(uuid())
+  userId        String
+  title         String
+  body          String
+  type          String   // TIER_UPGRADE, QUOTATION_ISSUED, DISCOUNT_APPROVED, ORDER_UPDATE, PAYMENT_DUE
+  referenceType String?  // QUOTATION, ORDER, PAYMENT, TIER
+  referenceId   String?
+  isRead        Boolean  @default(false)
+  createdAt     DateTime @default(now())
+
+  user          User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, isRead])
+}
+
+model DeviceToken {
+  id         String   @id @default(uuid())
+  userId     String
+  token      String   @unique
+  platform   String   @default("ANDROID") // ANDROID, IOS, WEB
+  lastUsedAt DateTime @default(now())
+
+  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+// -----------------------------------------------------------------------------
+// SUPPORT TICKETS & AUDIT & SETTINGS
+// -----------------------------------------------------------------------------
+
+model SupportTicket {
+  id             String        @id @default(uuid())
+  buyerProfileId String
+  subject        String
+  description    String
+  priority       String        @default("MEDIUM") // LOW, MEDIUM, HIGH, URGENT
+  status         String        @default("OPEN")   // OPEN, IN_PROGRESS, RESOLVED, CLOSED
+  assignedToId   String?
+  resolution     String?
+  createdAt      DateTime      @default(now())
+  updatedAt      DateTime      @updatedAt
+
+  buyer          BuyerProfile  @relation(fields: [buyerProfileId], references: [id], onDelete: Cascade)
+  assignedTo     User?         @relation("AssignedAdminTickets", fields: [assignedToId], references: [id])
+}
+
+model AuditLog {
+  id          String   @id @default(uuid())
+  actorId     String?
+  actorType   String   // ADMIN, SALESMAN, BUYER, SYSTEM
+  action      String   // PROMOTED_BUYER_TYPE, UPGRADED_LOYALTY, APPROVED_DISCOUNT, ADJUSTED_CREDIT, etc.
+  module      String   // buyers, quotations, orders, credit, products
+  entityId    String
+  beforeState Json?
+  afterState  Json?
+  ipAddress   String?
+  userAgent   String?
+  createdAt   DateTime @default(now())
+
+  actor       User?    @relation(fields: [actorId], references: [id])
+}
+
+model CompanySettings {
+  id          String   @id @default(uuid())
+  key         String   @unique
+  value       String
+  description String?
+  updatedAt   DateTime @updatedAt
+}
